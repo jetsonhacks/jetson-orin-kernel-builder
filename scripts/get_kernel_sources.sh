@@ -64,12 +64,18 @@ log() {
 
 # Extract L4T version details using sed
 L4T_MAJOR=$(sed -n 's/^.*R\([0-9]\+\).*/\1/p' /etc/nv_tegra_release)
-L4T_MINOR=$(sed -n 's/^.*REVISION: \([0-9]\+\(\.[0-9]\+\)*\).*/\1/p' /etc/nv_tegra_release)
+L4T_MINOR_FULL=$(sed -n 's/^.*REVISION: \([0-9]\+\(\.[0-9]\+\)*\).*/\1/p' /etc/nv_tegra_release)
 
-SOURCE_BASE="https://developer.nvidia.com/embedded/l4t/r${L4T_MAJOR}_release_v${L4T_MINOR}/sources"
+# Extract just the first digit of minor version for URL (e.g., 4.4.4 -> 4)
+# NVIDIA's download URLs use r36_release_v4.0 not r36_release_v4.4.4
+L4T_MINOR=$(echo "$L4T_MINOR_FULL" | cut -d'.' -f1)
+
+# Construct download URL - NOTE: NVIDIA uses /downloads/ in the path
+SOURCE_BASE="https://developer.nvidia.com/downloads/embedded/l4t/r${L4T_MAJOR}_release_v${L4T_MINOR}.0/sources"
 SOURCE_FILE="public_sources.tbz2"
 
-log "Detected L4T version: ${L4T_MAJOR} (${L4T_MINOR})"
+log "Detected L4T version: R${L4T_MAJOR}.${L4T_MINOR_FULL}"
+log "Download URL base: $SOURCE_BASE"
 log "Kernel sources directory: $KERNEL_SRC_DIR"
 
 # Check if kernel sources already exist
@@ -90,17 +96,17 @@ if [[ -d "$KERNEL_SRC_DIR/kernel" ]]; then
     echo "[B]ackup and download fresh sources"
     read -rp "Enter your choice (K/R/B): " USER_CHOICE
     case "$USER_CHOICE" in
-      [Rr]* ) 
+      [Rr]* )
         log "Deleting existing kernel sources..."
         sudo rm -rf "$KERNEL_SRC_DIR/kernel"
         ;;
-      [Bb]* ) 
+      [Bb]* )
         BACKUP_TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
         BACKUP_DIR="${KERNEL_SRC_DIR}kernel_backup_${BACKUP_TIMESTAMP}"
         log "Backing up existing kernel sources to $BACKUP_DIR..."
         sudo mv "$KERNEL_SRC_DIR/kernel" "$BACKUP_DIR"
         ;;
-      * ) 
+      * )
         log "Keeping existing kernel sources. Skipping download."
         exit 0
         ;;
@@ -109,7 +115,32 @@ if [[ -d "$KERNEL_SRC_DIR/kernel" ]]; then
 fi
 
 log "Downloading kernel sources from: $SOURCE_BASE/$SOURCE_FILE"
-wget -N "$SOURCE_BASE/$SOURCE_FILE"
+
+# Check if file already exists (from manual download)
+if [[ -f "$SOURCE_FILE" ]]; then
+  log "Found existing $SOURCE_FILE, skipping download"
+  log "Using existing file. Delete it first if you want to re-download."
+else
+  # Attempt download with error handling
+  if ! wget -N "$SOURCE_BASE/$SOURCE_FILE"; then
+  echo "[ERROR] Failed to download kernel sources from $SOURCE_BASE/$SOURCE_FILE"
+  echo ""
+  echo "This may be due to:"
+  echo "1. Incorrect URL mapping for your L4T version (R${L4T_MAJOR}.${L4T_MINOR_FULL})"
+  echo "2. NVIDIA changed their download URL structure"
+  echo ""
+  echo "To resolve:"
+  echo "1. Visit: https://developer.nvidia.com/embedded/jetson-linux-archive"
+  echo "2. Find your L4T version: R${L4T_MAJOR}.${L4T_MINOR_FULL}"
+  echo "3. Download 'public_sources.tbz2' manually"
+  echo "4. Place it in the current directory: $PWD"
+  echo "5. Re-run this script - it will use the existing file"
+  echo ""
+  echo "Alternative: Use git clone method from NVIDIA documentation:"
+  echo "  git clone https://nv-tegra.nvidia.com/3rdparty/canonical/linux-jammy.git"
+  exit 1
+  fi
+fi
 
 log "Extracting sources..."
 # Extract kernel source and related components
